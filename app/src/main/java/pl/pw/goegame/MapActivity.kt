@@ -1,14 +1,11 @@
 package pl.pw.goegame
 
-import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.location.LocationManager
-import android.os.Build
 import android.os.Bundle
 import android.preference.PreferenceManager
 import android.util.Log
@@ -16,7 +13,6 @@ import android.view.View
 import android.widget.Button
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -44,10 +40,10 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
 
-class MainActivity : AppCompatActivity() {
+class MapActivity : AppCompatActivity() {
 
     companion object {
-        private const val TAG = "pw.MainActivity"
+        private const val TAG = "pw.MapActivity"
     }
     private lateinit var bluetoothStateReceiver: BluetoothStateReceiver
     private lateinit var gpsStateReceiver: GpsStateReceiver
@@ -59,39 +55,21 @@ class MainActivity : AppCompatActivity() {
     private val region = Region("all-beacons-region", null, null, null)
     private val knownBeacons = HashMap<String, Pair<Double, Double>>()
 
-    private lateinit var showMapButton: Button
     private lateinit var map: MapView
 
     private var userMarker: Marker? = null
-
-    private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            if (permissions.entries.any { !it.value }) {
-                Toast.makeText(
-                    this,
-                    "Bez przydzielenia niezbędnych uprawnień aplikacja nie będzie działać prawidłowo.",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } else {
-                listenForConnectionChanges()
-            }
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
         enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_map)
         setUpUI()
         loadKnownBeacons()
         setUpBeaconManager()
-        requestRequiredPermissions()
-        showMapButton = findViewById(R.id.show_map_btn)
-
-        showMapButton.setOnClickListener {
-            startScanningIfPossible()
-        }
         initializeMap()
+        listenForConnectionChanges()
+        startScanningIfPossible()
     }
 
     override fun onResume() {
@@ -129,43 +107,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUpUI() {
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.map)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
     }
 
-    private fun requestRequiredPermissions() {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT,
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-            )
-        }
-        if (allPermissionsGranted(permissions)) {
-            listenForConnectionChanges()
-        } else {
-            requestPermissionLauncher.launch(permissions)
-        }
-    }
-
-    private fun allPermissionsGranted(permissions: Array<String>): Boolean {
-        permissions.forEach { permissionName ->
-            if (ContextCompat.checkSelfPermission(this, permissionName) == PackageManager.PERMISSION_DENIED) {
-                return false
-            }
-        }
-        return true
-    }
-
     private fun listenForConnectionChanges() {
-        Toast.makeText(this, "Upewnij się, że masz włączony GPS oraz Bluetooth.", Toast.LENGTH_SHORT).show()
         initializeConnectionFlags()
 
         bluetoothStateReceiver = BluetoothStateReceiver(
@@ -196,7 +145,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeMap() {
-        map = findViewById(R.id.map)
+        map = findViewById(R.id.mapView)
         map.setTileSource(TileSourceFactory.MAPNIK)
         val mapController = map.controller
         mapController.setZoom(14.0)
@@ -215,7 +164,7 @@ class MainActivity : AppCompatActivity() {
             scanForBeacons()
         }
         else {
-            Toast.makeText(this, "Upewnij się że włączyłeś GPS i BT", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "To tu Upewnij się że włączyłeś GPS i BT", Toast.LENGTH_SHORT).show()
             return
         }
     }
