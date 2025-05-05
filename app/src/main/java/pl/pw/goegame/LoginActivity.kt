@@ -1,11 +1,15 @@
 package pl.pw.goegame
 
 import android.Manifest
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.preference.PreferenceManager
+import android.util.Log
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -18,12 +22,20 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.osmdroid.config.Configuration.getInstance
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class LoginActivity : AppCompatActivity() {
+    companion object {
+        const val TAG = "PLAYER_SAVING"
+    }
 
+    private val playerService = PlayerService()
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            if (permissions.entries.any { !it.value }) {
+            if (permissions.entries.any { !it.value } or !userHasBTandLocationEnabled()) {
                 Toast.makeText(
                     this,
                     "Bez przydzielenia niezbędnych uprawnień aplikacja nie będzie działać prawidłowo.",
@@ -31,7 +43,7 @@ class LoginActivity : AppCompatActivity() {
                 ).show()
             }
             else {
-                switchToMapActivity()
+                savePlayerAndSwitchToMap()
             }
         }
 
@@ -75,11 +87,37 @@ class LoginActivity : AppCompatActivity() {
                 Manifest.permission.ACCESS_FINE_LOCATION,
             )
         }
-        if (allPermissionsGranted(permissions)) {
-            switchToMapActivity()
+        if (allPermissionsGranted(permissions) && userHasBTandLocationEnabled()) {
+            savePlayerAndSwitchToMap()
         }
         else {
             requestPermissionLauncher.launch(permissions)
+        }
+    }
+
+    private fun savePlayerAndSwitchToMap() {
+        val playerName = getUsername()
+        val team = getTeam()
+
+        lifecycleScope.launch {
+            try {
+                val playerId = playerService.addPlayer(playerName, team)
+
+                withContext(Dispatchers.Main) {
+                    Log.d(TAG, "Player $playerId saved successfully, switching to MapActivity.")
+                    switchToMapActivity(playerId)
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving player data to DB: ${e.message}", e) // Added error logging
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@LoginActivity,
+                        "Błąd podczas zapisywania danych gracza.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
 
@@ -91,13 +129,20 @@ class LoginActivity : AppCompatActivity() {
         }
         return true
     }
+    private fun getUsername(): String{
+      return findViewById<EditText>(R.id.nicknameEditText)
+          .text.toString()
+          .trim()
+    }
+
+    private fun getTeam(): String {
+        return findViewById<Spinner>(R.id.teamSpinner)
+            .selectedItem
+            .toString()
+    }
 
     private fun login() {
-        val nicknameEditText = findViewById<EditText>(R.id.nicknameEditText)
-        val teamSpinner = findViewById<Spinner>(R.id.teamSpinner)
-
-        val playerName = nicknameEditText.text.toString().trim()
-        val team = teamSpinner.selectedItem.toString()
+        val playerName = getUsername()
 
         if (playerName.isEmpty()) {
             Toast.makeText(this, "Please enter your player name", Toast.LENGTH_SHORT).show()
@@ -108,8 +153,20 @@ class LoginActivity : AppCompatActivity() {
 
     }
 
-    private fun switchToMapActivity() {
+    private fun userHasBTandLocationEnabled(): Boolean{
+        val locationManager = this.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val locationIsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+
+        val bluetoothManager = this.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
+        val btIsEnabled = bluetoothAdapter.isEnabled
+
+        return locationIsEnabled && btIsEnabled
+    }
+
+    private fun switchToMapActivity(playerId: String) {
         val intent = Intent(this, MapActivity::class.java)
+        intent.putExtra("PLAYER_ID_EXTRA", playerId)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
         finish()
