@@ -21,6 +21,12 @@ import com.google.firebase.firestore.firestore
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.altbeacon.beacon.Beacon
 import org.altbeacon.beacon.BeaconManager
 import org.altbeacon.beacon.BeaconParser
@@ -58,17 +64,25 @@ class MapActivity : AppCompatActivity() {
 
     private var userMarker: Marker? = null
 
+    private lateinit var playerId: String
+    private lateinit var playerLocation: GeoPoint
+
+    private val playerService = PlayerService()
+    private val scope = MainScope()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getInstance().load(this, PreferenceManager.getDefaultSharedPreferences(this))
         enableEdgeToEdge()
         setContentView(R.layout.activity_map)
         setUpUI()
+        assignPlayerId()
         loadKnownBeacons()
         setUpBeaconManager()
         initializeMap()
         listenForConnectionChanges()
         startScanningIfPossible()
+        Toast.makeText(this, "Hello $playerId", Toast.LENGTH_SHORT).show()
     }
 
     override fun onResume() {
@@ -87,6 +101,7 @@ class MapActivity : AppCompatActivity() {
         unregisterReceiver(bluetoothStateReceiver)
         unregisterReceiver(gpsStateReceiver)
         cleanupBeaconManager()
+        scope.cancel()
     }
 
     private fun setUpBeaconManager() {
@@ -156,6 +171,13 @@ class MapActivity : AppCompatActivity() {
         map.visibility = View.VISIBLE
     }
 
+    private fun assignPlayerId() {
+        val extras = intent.extras
+        if (extras != null) {
+            playerId = extras.getString("PLAYER_ID_EXTRA").toString()
+        }
+    }
+
     private fun startScanningIfPossible() {
         if(canScan()) {
             showMap()
@@ -193,6 +215,10 @@ class MapActivity : AppCompatActivity() {
 
             map.overlayManager.add(marker)
             userMarker = marker
+
+            scope.launch {
+                playerService.updatePlayerPosition(playerId, userLocation)
+            }
         }
     }
 
@@ -261,6 +287,10 @@ class MapActivity : AppCompatActivity() {
         val userLong = userY/longMetersPerDegree
 
         return GeoPoint(userLat, userLong)
+    }
+
+    private fun checkForPlayersNearby() {
+
     }
 
     private fun getBeaconsSpecs(beacons: List<Beacon>): List<LocationBeacon>{

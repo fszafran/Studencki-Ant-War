@@ -2,6 +2,7 @@ package pl.pw.goegame
 
 import android.util.Log
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.firestore
 import org.osmdroid.util.GeoPoint
 import com.google.firebase.firestore.GeoPoint as FirestoreGeoPoint
@@ -46,6 +47,18 @@ class PlayerService {
             Log.d(TAG, "Player $playerId location updated (via Coroutine).")
         } catch (e: Exception) {
             Log.w(TAG, "Error updating player $playerId location (via Coroutine).", e)
+            throw e
+        }
+    }
+
+    suspend fun getAllPlayers(): QuerySnapshot {
+        try {
+            val allPlayers = playersCollection
+                .get()
+                .await()
+            return allPlayers
+        }   catch (e: Exception) {
+            Log.d(TAG, "Error getting documents: ", e)
             throw e
         }
     }
