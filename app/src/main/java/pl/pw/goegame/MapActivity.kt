@@ -227,7 +227,7 @@ class MapActivity : AppCompatActivity() {
         val customIcon = ContextCompat.getDrawable(this, getIconForPlayer(player))
         val marker = Marker(map).apply {
             position = player.location
-            title = player.id + "\n" + player.id + "\n" + player.location?.let { formatGeoPoint(it) }
+            title = player.id + "\n" + player.team + "\n" + player.location?.let { formatGeoPoint(it) }
             isDraggable = false
             icon = customIcon
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -376,8 +376,16 @@ class MapActivity : AppCompatActivity() {
                         com.google.firebase.firestore.DocumentChange.Type.ADDED, com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
                             val player = otherPlayers[playerId] ?: Player(id = playerId, team = team)
                             player.location = location
-                            drawMarker(player)
-                            otherPlayers[playerId] = player
+
+                            if (player.location != null) {
+                                drawMarker(player)
+                                otherPlayers[playerId] = player
+                            } else {
+                                player.marker?.let { marker ->
+                                    map.overlayManager.remove(marker)
+                                }
+                                otherPlayers[playerId] = player
+                            }
                         }
 
                         com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
