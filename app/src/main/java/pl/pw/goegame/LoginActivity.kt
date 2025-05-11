@@ -105,7 +105,7 @@ class LoginActivity : AppCompatActivity() {
 
                 withContext(Dispatchers.Main) {
                     Log.d(TAG, "Player $playerId saved successfully, switching to MapActivity.")
-                    switchToMapActivity(playerId)
+                    switchToMapActivity(playerId, team)
                 }
 
             } catch (e: Exception) {
@@ -164,9 +164,10 @@ class LoginActivity : AppCompatActivity() {
         return locationIsEnabled && btIsEnabled
     }
 
-    private fun switchToMapActivity(playerId: String) {
+    private fun switchToMapActivity(playerId: String, team: String) {
         val intent = Intent(this, MapActivity::class.java)
         intent.putExtra("PLAYER_ID_EXTRA", playerId)
+        intent.putExtra("PLAYER_TEAM_EXTRA", team)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
         finish()

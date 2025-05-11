@@ -38,8 +38,10 @@ class PlayerService {
         }
     }
 
-    suspend fun updatePlayerPosition(playerId: String, newPosition: GeoPoint) {
-        val firestoreLocation = FirestoreGeoPoint(newPosition.latitude, newPosition.longitude)
+    suspend fun updatePlayerPosition(player: Player) {
+        val newPosition = player.location
+        val playerId = player.id
+        val firestoreLocation = newPosition?.let { FirestoreGeoPoint(it.latitude, newPosition.longitude) }
         try {
             playersCollection.document(playerId)
                 .update("location", firestoreLocation)
@@ -51,12 +53,19 @@ class PlayerService {
         }
     }
 
-    suspend fun getAllPlayers(): QuerySnapshot {
+    suspend fun getAllPlayers(): MutableList<Player> {
         try {
-            val allPlayers = playersCollection
-                .get()
-                .await()
-            return allPlayers
+            val allPlayersSnapshot = playersCollection.get().await()
+            val playerList = mutableListOf<Player>()
+
+            for (document in allPlayersSnapshot.documents) {
+                val id = document.id
+                val team = document.getString("team") ?: "Geodeci"
+                val locationFirestore = document.getGeoPoint("location")
+                val location = locationFirestore?.let { GeoPoint(it.latitude, it.longitude) }
+                playerList.add(Player(id = id, location = location, team = team, marker = null))
+            }
+            return playerList
         }   catch (e: Exception) {
             Log.d(TAG, "Error getting documents: ", e)
             throw e

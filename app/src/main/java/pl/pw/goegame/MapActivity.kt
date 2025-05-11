@@ -4,7 +4,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.IntentFilter
-import android.graphics.drawable.Drawable
 import android.location.LocationManager
 import android.os.Bundle
 import android.preference.PreferenceManager
@@ -17,14 +16,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.firestore
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.altbeacon.beacon.Beacon
@@ -49,7 +46,9 @@ class MapActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "pw.MapActivity"
+        private val region = Region("all-beacons-region", null, null, null)
     }
+
     private lateinit var bluetoothStateReceiver: BluetoothStateReceiver
     private lateinit var gpsStateReceiver: GpsStateReceiver
 
@@ -57,15 +56,13 @@ class MapActivity : AppCompatActivity() {
     private var gpsStateFlag: Boolean = false
 
     private lateinit var beaconManager: BeaconManager
-    private val region = Region("all-beacons-region", null, null, null)
+
     private val knownBeacons = HashMap<String, Pair<Double, Double>>()
 
     private lateinit var map: MapView
 
-    private var userMarker: Marker? = null
-
-    private lateinit var playerId: String
-    private lateinit var playerLocation: GeoPoint
+    private lateinit var mainPlayer: Player
+    private var otherPlayers = HashMap<String, Player>()
 
     private val playerService = PlayerService()
     private val scope = MainScope()
@@ -76,19 +73,25 @@ class MapActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_map)
         setUpUI()
-        assignPlayerId()
+        assignPlayerFromIntent()
         loadKnownBeacons()
         setUpBeaconManager()
         initializeMap()
         listenForConnectionChanges()
         startScanningIfPossible()
-        Toast.makeText(this, "Hello $playerId", Toast.LENGTH_SHORT).show()
+        listenForOtherPlayersData()
+
+        Toast.makeText(this, "Hello ${mainPlayer.id}", Toast.LENGTH_SHORT).show()
+        val point1 = GeoPoint(52.237049, 21.017532)
+        val point2 = GeoPoint(52.40, 20.97)
+
+        val dTAG = "distance"
+        Log.d(dTAG, point1.distanceToAsDouble(point2).toString())
     }
 
     override fun onResume() {
         super.onResume()
         map.onResume()
-        listenForPlayerData()
     }
 
     override fun onPause() {
@@ -171,10 +174,12 @@ class MapActivity : AppCompatActivity() {
         map.visibility = View.VISIBLE
     }
 
-    private fun assignPlayerId() {
+    private fun assignPlayerFromIntent() {
         val extras = intent.extras
         if (extras != null) {
-            playerId = extras.getString("PLAYER_ID_EXTRA").toString()
+            val id = extras.getString("PLAYER_ID_EXTRA").toString()
+            val team = extras.getString("PLAYER_TEAM_EXTRA").toString()
+            mainPlayer = Player(id, null, team, null)
         }
     }
 
@@ -194,33 +199,49 @@ class MapActivity : AppCompatActivity() {
         beaconManager.addRangeNotifier { beacons, _ ->
             val threeClosestBeacons = beacons.sortedBy { it.distance }.take(3)
             if(threeClosestBeacons.size == 3){
-                updateUserLocation(threeClosestBeacons)
+                updatePlayerLocation(threeClosestBeacons)
             }
         }
         beaconManager.startRangingBeacons(region)
     }
 
-    private fun updateUserLocation(beacons: List<Beacon>) {
+    private fun updatePlayerLocation(beacons: List<Beacon>) {
         val beaconSpecs = getBeaconsSpecs(beacons)
         if (beaconSpecs.size == 3){
-            val userLocation = trilateration(beaconSpecs)
+            val playerLocation = trilateration(beaconSpecs)
             val mapController = map.controller
             mapController.setZoom(20.0)
-            mapController.setCenter(userLocation)
-
-            userMarker?.let { map.overlayManager.remove(it) }
-
-            val customIcon = ContextCompat.getDrawable(this, R.drawable.shrak)
-            val marker = createMarker(userLocation, customIcon)
-
-            map.overlayManager.add(marker)
-            userMarker = marker
+            mapController.setCenter(playerLocation)
+            mainPlayer.location = playerLocation
+            drawMarker(mainPlayer)
 
             scope.launch {
-                playerService.updatePlayerPosition(playerId, userLocation)
+                playerService.updatePlayerPosition(mainPlayer)
             }
         }
     }
+
+    private fun drawMarker(player: Player) {
+        player.marker?.let { map.overlayManager.remove(it) }
+
+        val customIcon = ContextCompat.getDrawable(this, getIconForPlayer(player))
+        val marker = Marker(map).apply {
+            position = player.location
+            title = player.id + "\n" + player.id + "\n" + player.location?.let { formatGeoPoint(it) }
+            isDraggable = false
+            icon = customIcon
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        }
+        map.overlayManager.add(marker)
+        player.marker = marker
+    }
+
+    private fun getIconForPlayer(player: Player): Int =
+        if (player.team == "Geoinformatycy") {
+            R.drawable.shrak
+        } else {
+            R.drawable.sad_eye_joe
+        }
 
     private fun formatGeoPoint(geoPoint: GeoPoint): String {
         val latitude = geoPoint.latitude
@@ -241,17 +262,6 @@ class MapActivity : AppCompatActivity() {
 
         return "${latDegrees}° ${latMinutes}' ${decimalFormat.format(latSeconds)}\" $latDirection\n" +
                 "${lonDegrees}° ${lonMinutes}' ${decimalFormat.format(lonSeconds)}\" $lonDirection"
-    }
-
-    private fun createMarker(location: GeoPoint, customIcon: Drawable?): Marker {
-        val marker = Marker(map).apply {
-            position = location
-            title = "Tu jesteś:\n" + formatGeoPoint(location)
-            isDraggable = false
-            icon = customIcon
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-        }
-        return marker
     }
 
     private fun trilateration(locationBeacons: List<LocationBeacon>): GeoPoint {
@@ -287,10 +297,6 @@ class MapActivity : AppCompatActivity() {
         val userLong = userY/longMetersPerDegree
 
         return GeoPoint(userLat, userLong)
-    }
-
-    private fun checkForPlayersNearby() {
-
     }
 
     private fun getBeaconsSpecs(beacons: List<Beacon>): List<LocationBeacon>{
@@ -344,20 +350,47 @@ class MapActivity : AppCompatActivity() {
         cleanupBeaconManager()
     }
 
-    private fun listenForPlayerData() {
+    private fun listenForOtherPlayersData() {
         val db = Firebase.firestore
-        val docRef = db.collection("players").document("userId")
-        docRef.addSnapshotListener { snapshot, e ->
+        val playersCollectionRef = db.collection("players")
+
+        playersCollectionRef.addSnapshotListener { snapshot, e ->
             if (e != null) {
-                Log.w(TAG, "Listen failed.", e)
+                Log.w(TAG, "Listen failed for players collection.", e)
                 return@addSnapshotListener
             }
 
-            if (snapshot != null && snapshot.exists()) {
-                Log.d(TAG, "Current data: ${snapshot.data}")
-            } else {
-                Log.d(TAG, "Current data: null")
+            if (snapshot != null) {
+                for (dc in snapshot.documentChanges) {
+                    val playerId = dc.document.id
+
+                    if (playerId == mainPlayer.id) {
+                        continue
+                    }
+
+                    val team = dc.document.getString("team") ?: "Unknown"
+                    val locationFirestore = dc.document.getGeoPoint("location")
+                    val location = locationFirestore?.let { GeoPoint(it.latitude, it.longitude) }
+
+                    when (dc.type) {
+                        com.google.firebase.firestore.DocumentChange.Type.ADDED, com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                            val player = otherPlayers[playerId] ?: Player(id = playerId, team = team)
+                            player.location = location
+                            drawMarker(player)
+                            otherPlayers[playerId] = player
+                        }
+
+                        com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                            val removedPlayer = otherPlayers.remove(playerId)
+                            removedPlayer?.marker?.let { marker ->
+                                map.overlayManager.remove(marker)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
+
 }
