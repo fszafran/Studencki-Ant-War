@@ -2,7 +2,6 @@ package pl.pw.goegame
 
 import android.util.Log
 import com.google.firebase.Firebase
-import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.firestore
 import org.osmdroid.util.GeoPoint
 import com.google.firebase.firestore.GeoPoint as FirestoreGeoPoint
@@ -10,8 +9,7 @@ import kotlinx.coroutines.tasks.await
 
 class PlayerService {
     private val db = Firebase.firestore
-    private val playersCollection = db.collection("players")
-    private val gamesCollection = db.collection("games")
+    val playersCollection = db.collection("players")
 
     companion object {
         const val TAG = "FIREBASE"
@@ -53,21 +51,34 @@ class PlayerService {
         }
     }
 
-    suspend fun getAllPlayers(): MutableList<Player> {
+    suspend fun getAllPlayers(): HashMap<String, Player> {
         try {
             val allPlayersSnapshot = playersCollection.get().await()
-            val playerList = mutableListOf<Player>()
+            val playerMap = HashMap<String, Player>()
 
             for (document in allPlayersSnapshot.documents) {
                 val id = document.id
                 val team = document.getString("team") ?: "Geodeci"
                 val locationFirestore = document.getGeoPoint("location")
                 val location = locationFirestore?.let { GeoPoint(it.latitude, it.longitude) }
-                playerList.add(Player(id = id, location = location, team = team, marker = null))
+                playerMap[id] = Player(id = id, location = location, team = team, marker = null)
             }
-            return playerList
+            return playerMap
         }   catch (e: Exception) {
             Log.d(TAG, "Error getting documents: ", e)
+            throw e
+        }
+    }
+
+    suspend fun removePlayer(playerId: String): String {
+        try {
+            playersCollection.document(playerId)
+                .delete()
+                .await()
+            return playerId
+        }
+        catch (e: Exception) {
+            Log.d(TAG, "Error deleting player $playerId: ", e)
             throw e
         }
     }

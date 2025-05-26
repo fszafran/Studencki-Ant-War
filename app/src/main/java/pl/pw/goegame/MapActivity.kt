@@ -3,6 +3,7 @@ package pl.pw.goegame
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Bundle
@@ -16,7 +17,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.firebase.Firebase
-import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.firestore
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -62,9 +62,10 @@ class MapActivity : AppCompatActivity() {
     private lateinit var map: MapView
 
     private lateinit var mainPlayer: Player
-    private var otherPlayers = HashMap<String, Player>()
+    private var otherPlayers: HashMap<String, Player>? = null
 
     private val playerService = PlayerService()
+    private val gameService = GameService()
     private val scope = MainScope()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,6 +75,7 @@ class MapActivity : AppCompatActivity() {
         setContentView(R.layout.activity_map)
         setUpUI()
         assignPlayerFromIntent()
+        loadOtherPlayers()
         loadKnownBeacons()
         setUpBeaconManager()
         initializeMap()
@@ -82,11 +84,6 @@ class MapActivity : AppCompatActivity() {
         listenForOtherPlayersData()
 
         Toast.makeText(this, "Hello ${mainPlayer.id}", Toast.LENGTH_SHORT).show()
-        val point1 = GeoPoint(52.237049, 21.017532)
-        val point2 = GeoPoint(52.40, 20.97)
-
-        val dTAG = "distance"
-        Log.d(dTAG, point1.distanceToAsDouble(point2).toString())
     }
 
     override fun onResume() {
@@ -104,6 +101,9 @@ class MapActivity : AppCompatActivity() {
         unregisterReceiver(bluetoothStateReceiver)
         unregisterReceiver(gpsStateReceiver)
         cleanupBeaconManager()
+        scope.launch {
+            playerService.removePlayer(mainPlayer.id)
+        }
         scope.cancel()
     }
 
@@ -157,6 +157,23 @@ class MapActivity : AppCompatActivity() {
         this.bluetoothStateFlag = bluetoothAdapter.isEnabled
     }
 
+    private fun loadOtherPlayers() {
+        scope.launch {
+            val fetchedPlayers = playerService.getAllPlayers()
+            otherPlayers = HashMap<String, Player>()
+
+            fetchedPlayers.forEach { (id, player) ->
+                if (id != mainPlayer.id) {
+                    otherPlayers!![id] = player
+                    if (player.location != null) {
+                        drawMarker(player)
+                    }
+                }
+            }
+            Log.d(TAG, "Loaded ${otherPlayers!!.size} initial players")
+        }
+    }
+
     private fun canScan(): Boolean {
         return gpsStateFlag && bluetoothStateFlag
     }
@@ -198,32 +215,66 @@ class MapActivity : AppCompatActivity() {
     private fun scanForBeacons() {
         beaconManager.addRangeNotifier { beacons, _ ->
             val threeClosestBeacons = beacons.sortedBy { it.distance }.take(3)
-            if(threeClosestBeacons.size == 3){
-                updatePlayerLocation(threeClosestBeacons)
-            }
+//            if(threeClosestBeacons.size == 3){
+
+//            }
         }
+        updatePlayerLocation()
         beaconManager.startRangingBeacons(region)
     }
 
-    private fun updatePlayerLocation(beacons: List<Beacon>) {
-        val beaconSpecs = getBeaconsSpecs(beacons)
-        if (beaconSpecs.size == 3){
-            val playerLocation = trilateration(beaconSpecs)
-            val mapController = map.controller
-            mapController.setZoom(20.0)
-            mapController.setCenter(playerLocation)
-            mainPlayer.location = playerLocation
-            drawMarker(mainPlayer)
+    private fun updatePlayerLocation() {
+        val playerLocation = GeoPoint(52.0, 21.0)
+        val mapController = map.controller
+        mapController.setZoom(20.0)
+        mapController.setCenter(playerLocation)
+        mainPlayer.location = playerLocation
+        drawMarker(mainPlayer)
+        launchGameActivityIfPlayerNearby()
+        scope.launch {
+            playerService.updatePlayerPosition(mainPlayer)
+        }
 
+//        if (beaconSpecs.size == 3){
+//            val playerLocation = trilateration(beaconSpecs)
+//            val mapController = map.controller
+//            mapController.setZoom(20.0)
+//            mapController.setCenter(playerLocation)
+//            mainPlayer.location = playerLocation
+//            drawMarker(mainPlayer)
+//            launchGameActivityIfPlayerNearby()
+//            scope.launch {
+//                playerService.updatePlayerPosition(mainPlayer)
+//            }
+    }
+
+
+    private fun launchGameActivityIfPlayerNearby() {
+        if (mainPlayer.location == null) {
+            return
+        }
+        val playerNearby = playerNearby()
+        if (playerNearby != null) {
             scope.launch {
-                playerService.updatePlayerPosition(mainPlayer)
+               val gameId = gameService.createGame(mainPlayer, playerNearby)
+               switchToGameActivity(gameId, mainPlayer.id, playerNearby.id)
             }
         }
+    }
+
+    private fun switchToGameActivity(gameId: String, player1Id: String, player2Id: String ) {
+        Log.d(TAG, "Switching to game activity for players: $player1Id, $player2Id")
+        val intent = Intent(this, GameActivity::class.java)
+        intent.putExtra("GAME_ID", gameId)
+        intent.putExtra("PLAYER_ID", player1Id)
+        intent.putExtra("OPPONENT_ID", player2Id)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
+        finish()
     }
 
     private fun drawMarker(player: Player) {
         player.marker?.let { map.overlayManager.remove(it) }
-
         val customIcon = ContextCompat.getDrawable(this, getIconForPlayer(player))
         val marker = Marker(map).apply {
             position = player.location
@@ -240,7 +291,7 @@ class MapActivity : AppCompatActivity() {
         if (player.team == "Geoinformatycy") {
             R.drawable.shrak
         } else {
-            R.drawable.sad_eye_joe
+            R.drawable.shrak_deci
         }
 
     private fun formatGeoPoint(geoPoint: GeoPoint): String {
@@ -350,9 +401,25 @@ class MapActivity : AppCompatActivity() {
         cleanupBeaconManager()
     }
 
+    private fun playerNearby(): Player? {
+        val PROXIMITY_METERS = 2
+        Log.d(TAG, "Other players: ${otherPlayers.toString()}")
+        otherPlayers?.forEach { (_, player) ->
+            if (player.location == null || player.team == mainPlayer.team) {
+                return@forEach
+            }
+            val distanceFromMainPlayer = mainPlayer.location?.distanceToAsDouble(player.location)
+            if (distanceFromMainPlayer != null && distanceFromMainPlayer <= PROXIMITY_METERS) {
+                return player
+            }
+        }
+        return null
+    }
+
     private fun listenForOtherPlayersData() {
         val db = Firebase.firestore
-        val playersCollectionRef = db.collection("players")
+        val playersCollectionRef = playerService.playersCollection
+        val gamesCollectionRef = gameService.gamesCollection
 
         playersCollectionRef.addSnapshotListener { snapshot, e ->
             if (e != null) {
@@ -373,23 +440,25 @@ class MapActivity : AppCompatActivity() {
                     val location = locationFirestore?.let { GeoPoint(it.latitude, it.longitude) }
 
                     when (dc.type) {
-                        com.google.firebase.firestore.DocumentChange.Type.ADDED, com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
-                            val player = otherPlayers[playerId] ?: Player(id = playerId, team = team)
-                            player.location = location
-
-                            if (player.location != null) {
-                                drawMarker(player)
-                                otherPlayers[playerId] = player
-                            } else {
-                                player.marker?.let { marker ->
-                                    map.overlayManager.remove(marker)
+                        com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                        com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                            if (otherPlayers != null) {
+                                Log.d(TAG, "${otherPlayers!![playerId]}")
+                                val player = otherPlayers!![playerId] ?: Player(id = playerId, team = team)
+                                player.location = location
+                                Log.d(TAG, "Called for: ${playerId}")
+                                if (player.location != null) {
+                                    drawMarker(player)
+                                    otherPlayers!![playerId] = player
+                                    if (player.team != mainPlayer.team) {
+                                        launchGameActivityIfPlayerNearby()
+                                    }
                                 }
-                                otherPlayers[playerId] = player
                             }
                         }
 
                         com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
-                            val removedPlayer = otherPlayers.remove(playerId)
+                            val removedPlayer = otherPlayers?.remove(playerId)
                             removedPlayer?.marker?.let { marker ->
                                 map.overlayManager.remove(marker)
                             }
@@ -398,6 +467,28 @@ class MapActivity : AppCompatActivity() {
                 }
             }
         }
+
+        gamesCollectionRef
+            .whereEqualTo("status", "pending")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "Listen failed for games collection.", e)
+                    return@addSnapshotListener
+                }
+
+                snapshot?.documents?.forEach { doc ->
+                    val player1 = doc.getString("player1")
+                    val player2 = doc.getString("player2")
+
+                    if (player1 == mainPlayer.id || player2 == mainPlayer.id){
+                        val opponentId = if (player1 == mainPlayer.id) player2 else player1
+                        if (opponentId != null) {
+                            switchToGameActivity(doc.id, mainPlayer.id, opponentId)
+                        }
+                    }
+                }
+
+            }
     }
 
 

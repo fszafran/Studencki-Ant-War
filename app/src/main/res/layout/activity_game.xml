@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:id="@+id/game"
+    android:gravity="center">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Wybierz swój atak"
+        android:textSize="24sp"
+        android:layout_marginBottom="16dp"
+        android:id="@+id/gameTitle"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <ImageButton
+            android:id="@+id/btnRock"
+            android:layout_width="220dp"
+            android:layout_height="220dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="Rock choice"
+            android:src="@drawable/n_rock" />
+
+        <ImageButton
+        android:id="@+id/btnPaper"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="Paper choice"
+        android:src="@drawable/paper" />
+
+        <ImageButton
+        android:id="@+id/btnScissors"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="Scissors choice"
+        android:src="@drawable/scissors" />
+    </LinearLayout>
+
+</LinearLayout>
